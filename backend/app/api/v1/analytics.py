@@ -12,7 +12,7 @@ from sqlalchemy import Select, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_tenant_scope
-from app.core.tenancy import TenantScope, scope_filter
+from app.core.tenancy import TenantScope, call_log_scope_filter, scope_filter
 from app.models import (
     Appointment,
     AppointmentStatus,
@@ -67,7 +67,7 @@ async def get_analytics(
                     _count_if(sentiment == "neutral").label("neutral"),
                     _count_if(sentiment == "negative").label("negative"),
                     _count_if(sentiment.is_(None)).label("unscored"),
-                ).where(scope_filter(scope, CallLog)),
+                ).where(call_log_scope_filter(scope, CallLog)),
                 CallLog.created_at,
                 window_start,
                 window_end,

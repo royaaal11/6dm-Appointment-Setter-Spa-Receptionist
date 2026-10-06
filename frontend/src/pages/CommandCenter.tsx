@@ -7,6 +7,7 @@ import {
   ShieldCheck,
   Star,
   Target,
+  RefreshCw,
 } from "lucide-react";
 import {
   fetchAnalytics,
@@ -34,6 +35,7 @@ export default function CommandCenter() {
   const [calls, setCalls] = useState<CallLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // The lens follows the scope the API is already answering in: a spa user has
   // only their own spa, and a super admin is looking at the sales workspace
@@ -42,22 +44,26 @@ export default function CommandCenter() {
   const showingSalesWorkspace =
     canAccessSalesAgent(role) && !impersonatedTenantId;
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDashboard = async () => {
     setLoading(true);
-    Promise.all([fetchAnalytics(), fetchCallLogs()])
-      .then(([summary, logs]) => {
-        if (cancelled) return;
+    setRefreshing(true);
+    const callQuery = showingSalesWorkspace ? undefined : { direction: "inbound" as const };
+    try {
+      const [summary, logs] = await Promise.all([fetchAnalytics(), fetchCallLogs(callQuery)]);
         setAnalytics(summary);
         setCalls(logs);
         setError(null);
-      })
-      .catch(() => !cancelled && setError("Unable to load workspace data."))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [impersonatedTenantId]);
+    } catch {
+      setError("Unable to refresh workspace data.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [impersonatedTenantId, showingSalesWorkspace]);
 
   const kpis = useMemo(() => {
     if (!analytics) return [];
@@ -140,9 +146,20 @@ export default function CommandCenter() {
             : "Your spa's inbound reception overview is ready for review."
         }
         actions={
-          // Outbound dialling is a 6DM Sales Agent capability. Spa clients never
-          // see the trigger, and the endpoint would 403 them if they did.
-          showingSalesWorkspace ? <LaunchOutboundCall /> : undefined
+          <div className="flex items-center gap-2">
+            {showingSalesWorkspace && <LaunchOutboundCall />}
+            <button
+              type="button"
+              onClick={() => void loadDashboard()}
+              disabled={refreshing}
+              aria-label="Refresh dashboard"
+              title="Refresh dashboard"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-400/50 hover:text-cyan-300 disabled:cursor-wait disabled:opacity-60"
+            >
+              <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
+              {refreshing ? "Refreshing" : "Refresh"}
+            </button>
+          </div>
         }
       />
 
@@ -159,7 +176,7 @@ export default function CommandCenter() {
         subtitle={
           showingSalesWorkspace
             ? "Outbound conversations from the 6DM Sales Agent."
-            : "Every call your AI receptionist answered."
+            : "Inbound conversations your AI receptionist answered."
         }
         padded={false}
       >

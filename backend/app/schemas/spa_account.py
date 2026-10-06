@@ -37,6 +37,36 @@ class SpaStaffMember(BaseModel):
     services: list[str] = Field(default_factory=list)
 
 
+class SpaUpsellRule(BaseModel):
+    base_service: str = Field(..., max_length=255)
+    allowed_upsells: list[str] = Field(default_factory=list)
+
+
+class SpaPaymentPolicy(BaseModel):
+    """Booking CC configuration: whether a card is required, and how.
+
+    collection_mode:
+      none               — do not collect a card on the call (default)
+      at_spa             — tell the caller a card is taken at the spa
+      square_link        — Square-hosted payment; never spoken PAN/CVV
+      secure_voice_card  — Twilio Pay only; the AI never hears PAN or CVV
+      secure_sms_link    — text a one-time page that saves a card on file; no charge
+    """
+
+    card_required: bool = False
+    collection_mode: str = "none"
+    script: str | None = Field(None, max_length=1000)
+
+    @field_validator("collection_mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        allowed = {"none", "at_spa", "square_link", "secure_voice_card", "secure_sms_link"}
+        value = (v or "none").strip().lower()
+        if value not in allowed:
+            raise ValueError(f"collection_mode must be one of {sorted(allowed)}")
+        return value
+
+
 def _normalize_e164(v: str | None) -> str | None:
     if v is None:
         return None
@@ -62,14 +92,24 @@ def _validate_hours(v: dict[str, Any]) -> dict[str, Any]:
 
 class SpaAccountBase(BaseModel):
     name: str = Field(..., max_length=255)
+    location: str | None = Field(None, max_length=512)
     twilio_phone_number: str | None = Field(None, max_length=32)
     grok_system_prompt: str | None = Field(None, max_length=8000)
     business_hours: dict[str, list[BusinessHoursWindow]] = Field(default_factory=dict)
     services: list[SpaService] = Field(default_factory=list)
     staff: list[SpaStaffMember] = Field(default_factory=list)
-    timezone: str = Field("UTC", max_length=64)
+    timezone: str = Field("America/Chicago", max_length=64)
     booking_provider: BookingProvider = BookingProvider.GOOGLE_CALENDAR
     twiml_voice: str | None = Field(None, max_length=64)
+    description: str | None = Field(None, max_length=4000)
+    public_phone: str | None = Field(None, max_length=32)
+    cancellation_policy: str | None = Field(None, max_length=4000)
+    amenities: list[str] = Field(default_factory=list)
+    packages: list[Any] = Field(default_factory=list)
+    upsell_rules: list[SpaUpsellRule] = Field(default_factory=list)
+    payment_policy: SpaPaymentPolicy = Field(default_factory=SpaPaymentPolicy)
+    notification_settings: dict[str, Any] = Field(default_factory=dict)
+    booking_policies: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("twilio_phone_number")
     @classmethod
@@ -91,6 +131,7 @@ class SpaAccountUpdate(BaseModel):
     """Every field optional; a PATCH from the spa's own settings screen."""
 
     name: str | None = Field(None, max_length=255)
+    location: str | None = Field(None, max_length=512)
     twilio_phone_number: str | None = Field(None, max_length=32)
     grok_system_prompt: str | None = Field(None, max_length=8000)
     business_hours: dict[str, list[BusinessHoursWindow]] | None = None
@@ -101,6 +142,15 @@ class SpaAccountUpdate(BaseModel):
     booking_config: dict[str, Any] | None = None
     twiml_voice: str | None = Field(None, max_length=64)
     is_active: bool | None = None
+    description: str | None = Field(None, max_length=4000)
+    public_phone: str | None = Field(None, max_length=32)
+    cancellation_policy: str | None = Field(None, max_length=4000)
+    amenities: list[str] | None = None
+    packages: list[Any] | None = None
+    upsell_rules: list[SpaUpsellRule] | None = None
+    payment_policy: SpaPaymentPolicy | None = None
+    notification_settings: dict[str, Any] | None = None
+    booking_policies: dict[str, Any] | None = None
 
     @field_validator("twilio_phone_number")
     @classmethod
@@ -118,7 +168,8 @@ class SpaAccountRead(ORMModel, SpaAccountBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
-    # `booking_config` holds provider secrets and is intentionally omitted.
+    # Secrets are returned only as masked values by the router.
+    booking_config: dict[str, Any] = Field(default_factory=dict)
     booking_provider_configured: bool = False
 
 

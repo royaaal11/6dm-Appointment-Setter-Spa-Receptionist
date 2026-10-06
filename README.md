@@ -58,6 +58,6 @@ A full-stack appointment booking and outreach platform for multi-tenant service 
 │   ├── tailwind.config.js
 │   └── Dockerfile
 ├── docker-compose.yml
-├── .env
+├── .env.example
 ├── package.json
 └── README.md

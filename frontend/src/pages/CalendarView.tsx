@@ -12,6 +12,24 @@ const STATUS_STYLES: Record<string, string> = {
   no_show: "bg-amber-400/10 text-amber-300",
 };
 
+const CARD_STATUS_LABELS: Record<string, string> = {
+  card_confirmed: "Card on file",
+  pending_card: "Pending card",
+  not_required: "Card not required",
+  failed: "Card save failed",
+  not_supported: "Card not supported",
+  unknown: "Card status unknown",
+};
+
+const CARD_STATUS_STYLES: Record<string, string> = {
+  card_confirmed: "bg-emerald-400/10 text-emerald-300",
+  pending_card: "bg-amber-400/10 text-amber-300",
+  not_required: "bg-slate-700/40 text-slate-400",
+  failed: "bg-rose-400/10 text-rose-300",
+  not_supported: "bg-slate-700/40 text-slate-400",
+  unknown: "bg-slate-700/40 text-slate-400",
+};
+
 /**
  * Upcoming bookings for whichever calendar the caller's scope maps to:
  * Dominic's sales calendar for the 6DM workspace, the spa's service calendar
@@ -100,14 +118,26 @@ export default function CalendarView({
                             : ""}
                         </p>
                       </div>
-                      <span
-                        className={`h-fit rounded-md px-2 py-1 text-[10px] font-semibold ${
-                          STATUS_STYLES[appointment.status] ||
-                          "bg-slate-700/40 text-slate-300"
-                        }`}
-                      >
-                        {appointment.status.replace(/_/g, " ")}
-                      </span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span
+                          className={`h-fit rounded-md px-2 py-1 text-[10px] font-semibold ${
+                            STATUS_STYLES[appointment.status] ||
+                            "bg-slate-700/40 text-slate-300"
+                          }`}
+                        >
+                          {appointment.status.replace(/_/g, " ")}
+                        </span>
+                        {appointment.card_status && CARD_STATUS_LABELS[appointment.card_status] && (
+                          <span
+                            className={`h-fit rounded-md px-2 py-1 text-[10px] font-semibold ${
+                              CARD_STATUS_STYLES[appointment.card_status] ||
+                              "bg-slate-700/40 text-slate-300"
+                            }`}
+                          >
+                            {CARD_STATUS_LABELS[appointment.card_status]}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

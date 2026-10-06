@@ -90,7 +90,7 @@ export default function AnalyticsView({
               <StatCard
                 label="Calls"
                 value={data.calls.total}
-                sub={`${data.calls.inbound} in · ${data.calls.outbound} out`}
+                sub={data.scope === "spa" ? `${data.calls.inbound} inbound` : `${data.calls.inbound} in · ${data.calls.outbound} out`}
                 icon={PhoneCall}
               />
               <StatCard

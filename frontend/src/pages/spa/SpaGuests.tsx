@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchContacts, type Contact } from "../../api/client";
+import { fetchContacts, getApiErrorMessage, type Contact } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { PageHeader, Panel, StateBlock } from "../../components/ui/Primitives";
 
@@ -17,7 +17,7 @@ export default function SpaGuests() {
         setGuests(rows);
         setError(null);
       })
-      .catch(() => setError("Unable to load guests."))
+      .catch((err) => setError(getApiErrorMessage(err, "Unable to load guests.")))
       .finally(() => setLoading(false));
   }, [impersonatedTenantId]);
 

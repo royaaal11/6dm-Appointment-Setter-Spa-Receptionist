@@ -36,6 +36,7 @@ class CallLogRead(ORMModel):
     transcript: str | None
     recording_url: str | None
     ai_summary: str | None
+    primary_language: str | None
     ai_analysis: dict[str, Any]
     created_at: datetime
 

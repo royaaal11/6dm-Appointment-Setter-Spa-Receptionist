@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { fetchCallLogs, type CallLog } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import BrowserTestCall from "../../components/BrowserTestCall";
 import RecentCallsTable from "../../components/RecentCallsTable";
 import { PageHeader, Panel, StateBlock } from "../../components/ui/Primitives";
 
@@ -47,6 +48,10 @@ export default function SpaCalls() {
           </button>
         }
       />
+
+      <Panel title="AI Receptionist Test" subtitle="Test the browser microphone path without affecting the live phone flow.">
+        <BrowserTestCall />
+      </Panel>
 
       <Panel
         title="Call log"

@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.appointment import AppointmentStatus
+from app.models.appointment import AppointmentStatus, CardStatus
 from app.schemas.common import ORMModel
 
 
@@ -46,5 +46,6 @@ class AppointmentRead(ORMModel, AppointmentBase):
     # in that system, when the provider supports write-back.
     booking_provider: str | None = None
     external_booking_id: str | None = None
+    card_status: CardStatus = CardStatus.UNKNOWN
     created_at: datetime
     updated_at: datetime

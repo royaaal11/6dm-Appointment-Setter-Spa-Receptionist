@@ -22,6 +22,10 @@ passlib==1.7.4
 bcrypt==4.0.1
 pyjwt>=2.8.0
 python-dateutil>=2.9.0
+cryptography>=43.0.0
+google-api-python-client>=2.149.0
+google-auth>=2.35.0
+google-auth-oauthlib>=1.2.1
 # Ships the IANA tz database for zoneinfo. Required for per-spa timezones in
 # app/services/business_hours.py: Windows has no system tz database at all, and
 # slim Linux images frequently omit it.

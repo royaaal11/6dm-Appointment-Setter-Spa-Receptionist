@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from app.api.deps import get_db, get_tenant_scope
 from app.core.tenancy import TenantScope, owns, scope_columns, scope_filter
@@ -44,7 +45,11 @@ async def list_contacts(
     scope: TenantScope = Depends(get_tenant_scope),
     db: AsyncSession = Depends(get_db),
 ) -> Page[ContactRead]:
-    query = select(Contact).where(scope_filter(scope, Contact))
+    query = (
+        select(Contact)
+        .options(noload(Contact.appointments), noload(Contact.call_logs))
+        .where(scope_filter(scope, Contact))
+    )
     if search:
         pattern = f"%{search}%"
         query = query.where(

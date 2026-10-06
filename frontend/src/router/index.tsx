@@ -10,6 +10,7 @@ import OutboundCampaigns from "../pages/sales/OutboundCampaigns";
 import SpaCalls from "../pages/spa/SpaCalls";
 import SpaGuests from "../pages/spa/SpaGuests";
 import SpaSettings from "../pages/spa/SpaSettings";
+import SpaServices from "../pages/spa/SpaServices";
 import { RequireAuth, RequireRole } from "./guards";
 import { ROUTE_ROLES } from "./navigation";
 
@@ -67,6 +68,7 @@ export default function AppRoutes() {
         {/* Spa Receptionist — scoped to the caller's own tenant. */}
         <Route path="spa/calls" element={guard("/spa/calls", <SpaCalls />)} />
         <Route path="spa/guests" element={guard("/spa/guests", <SpaGuests />)} />
+        <Route path="spa/services" element={guard("/spa/services", <SpaServices />)} />
         <Route path="spa/settings" element={guard("/spa/settings", <SpaSettings />)} />
         <Route
           path="spa/calendar"

@@ -1,11 +1,14 @@
 """Row-level scoping: the filter that keeps one spa out of another's data."""
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.dialects import postgresql
 
+from app.schemas.contact import ContactRead
+
 from app.api.deps import get_tenant_scope
-from app.core.tenancy import TenantScope, owns, scope_columns, scope_filter
+from app.core.tenancy import TenantScope, call_log_scope_filter, owns, scope_columns, scope_filter
 from app.main import app
 from app.models import Appointment, CallLog, Contact
 
@@ -35,6 +38,17 @@ def test_sales_scope_requires_null_tenant_and_matching_owner(model, owner_column
     assert owner_column in clause
 
 
+def test_spa_call_scope_is_inbound_only():
+    clause = _sql(call_log_scope_filter(TenantScope.for_tenant(TENANT_A), CallLog))
+    assert "tenant_id = " in clause
+    assert "direction = " in clause
+
+
+def test_sales_call_scope_keeps_outbound_calls_available():
+    clause = _sql(call_log_scope_filter(TenantScope.for_sales_workspace(OWNER), CallLog))
+    assert "direction" not in clause
+
+
 @pytest.mark.parametrize(
     "model,owner_column",
     [(Contact, "owner_id"), (Appointment, "user_id")],
@@ -60,6 +74,45 @@ def test_owns_rejects_rows_from_another_tenant():
     assert owns(TenantScope.for_sales_workspace(OWNER), lead)
     assert not owns(TenantScope.for_sales_workspace(OWNER), guest)
     assert not owns(TenantScope.for_sales_workspace(uuid.uuid4()), lead)
+
+
+def test_contact_blank_email_is_normalized_to_none():
+    row = ContactRead.model_validate({
+        "id": uuid.uuid4(),
+        "owner_id": None,
+        "tenant_id": TENANT_A,
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "phone_number": "+15550000001",
+        "email": "",
+        "extra_metadata": {},
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "full_name": "Ada Lovelace",
+    })
+
+    assert row.email is None
+    assert row.full_name == "Ada Lovelace"
+
+
+def test_contact_read_does_not_fail_the_guest_list_on_messy_receptionist_data():
+    """One bad stored email/phone must not 500 GET /contacts."""
+    row = ContactRead.model_validate({
+        "id": uuid.uuid4(),
+        "owner_id": None,
+        "tenant_id": TENANT_A,
+        "first_name": "Sarah",
+        "last_name": None,
+        "phone_number": "555-0199",
+        "email": "sarah at the spa",
+        "extra_metadata": None,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "full_name": "Sarah",
+    })
+    assert row.email == "sarah at the spa"
+    assert row.phone_number == "555-0199"
+    assert row.extra_metadata == {}
 
 
 def test_every_tenant_scoped_route_declares_the_scope_dependency():

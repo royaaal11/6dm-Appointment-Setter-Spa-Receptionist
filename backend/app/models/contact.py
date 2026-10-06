@@ -74,10 +74,10 @@ class Contact(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     owner: Mapped["User | None"] = relationship(back_populates="contacts")
     tenant: Mapped["SpaAccount | None"] = relationship()
     appointments: Mapped[list["Appointment"]] = relationship(
-        back_populates="contact", cascade="all, delete-orphan", lazy="selectin"
+        back_populates="contact", cascade="all, delete-orphan"
     )
     call_logs: Mapped[list["CallLog"]] = relationship(
-        back_populates="contact", lazy="selectin"
+        back_populates="contact"
     )
 
     @property

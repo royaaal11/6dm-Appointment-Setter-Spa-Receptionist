@@ -1,6 +1,30 @@
 import axios, { type AxiosInstance } from "axios";
 
-const BASE_URL: string = (import.meta.env.VITE_API_BASE_URL as string) || "http://127.0.0.1:8000";
+type ApiErrorDetail = string | { msg?: string; loc?: Array<string | number> }[];
+
+/** Convert FastAPI string or validation-list errors into safe UI text. */
+export const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  if (!axios.isAxiosError(error)) return fallback;
+
+  const detail = error.response?.data?.detail as ApiErrorDetail | undefined;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        const location = item.loc?.filter((part) => part !== "body").join(" > ");
+        return location ? `${location}: ${item.msg || "Invalid value"}` : item.msg || "Invalid value";
+      })
+      .filter(Boolean);
+    if (messages.length) return messages.join(" ");
+  }
+  return fallback;
+};
+
+const BASE_URL: string =
+  (import.meta.env.NEXT_PUBLIC_API_URL as string) ||
+  (import.meta.env.VITE_API_BASE_URL as string) ||
+  "http://127.0.0.1:8000";
 
 export const ACCESS_TOKEN_KEY = "access_token";
 export const REFRESH_TOKEN_KEY = "refresh_token";
@@ -99,6 +123,29 @@ export interface SpaService {
   description?: string | null;
 }
 
+export interface ServiceCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  service_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManagedService {
+  id: string;
+  category_id: string;
+  category_name: string;
+  name: string;
+  description: string | null;
+  price: string | null;
+  duration_minutes: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SpaStaffMember {
   name: string;
   role?: string | null;
@@ -108,6 +155,7 @@ export interface SpaStaffMember {
 export interface SpaAccount {
   id: string;
   name: string;
+  location: string | null;
   twilio_phone_number: string | null;
   grok_system_prompt: string | null;
   business_hours: Record<string, BusinessHoursWindow[]>;
@@ -115,11 +163,40 @@ export interface SpaAccount {
   staff: SpaStaffMember[];
   timezone: string;
   booking_provider: BookingProvider;
+  booking_config: Record<string, string>;
   twiml_voice: string | null;
   is_active: boolean;
   booking_provider_configured: boolean;
   created_at: string;
   updated_at: string;
+  description: string | null;
+  public_phone: string | null;
+  cancellation_policy: string | null;
+  amenities: string[];
+  packages: unknown[];
+  upsell_rules: { base_service: string; allowed_upsells: string[] }[];
+  payment_policy: {
+    card_required: boolean;
+    collection_mode: "none" | "at_spa" | "square_link" | "secure_sms_link";
+    script?: string | null;
+  };
+}
+
+export interface GoogleCalendarStatus {
+  status: string;
+  connected: boolean;
+  google_account_email: string | null;
+  selected_calendar_id: string | null;
+  last_tested_at: string | null;
+}
+
+export interface GoogleCalendarOption {
+  id: string;
+  summary: string;
+  description?: string | null;
+  timeZone?: string | null;
+  accessRole?: string | null;
+  primary?: boolean;
 }
 
 export interface SpaAccountSummary {
@@ -188,6 +265,7 @@ export interface CallLog {
   transcript: string | null;
   recording_url: string | null;
   ai_summary: string | null;
+  primary_language: string | null;
   ai_analysis: Record<string, unknown>;
   created_at: string;
 }
@@ -199,6 +277,14 @@ export type AppointmentStatus =
   | "completed"
   | "no_show";
 
+export type CardStatus =
+  | "not_required"
+  | "not_supported"
+  | "unknown"
+  | "pending_card"
+  | "card_confirmed"
+  | "failed";
+
 export interface Appointment {
   id: string;
   user_id: string | null;
@@ -208,6 +294,7 @@ export interface Appointment {
   title: string;
   description: string | null;
   status: AppointmentStatus;
+  card_status?: CardStatus;
   start_time: string;
   end_time: string;
   booking_provider: string | null;
@@ -334,13 +421,22 @@ export const updateSpaAccount = async (
     Pick<
       SpaAccount,
       | "name"
+      | "location"
       | "grok_system_prompt"
       | "business_hours"
       | "services"
       | "staff"
       | "timezone"
       | "booking_provider"
+      | "booking_config"
       | "twiml_voice"
+      | "description"
+      | "public_phone"
+      | "cancellation_policy"
+      | "amenities"
+      | "packages"
+      | "upsell_rules"
+      | "payment_policy"
     >
   >
 ): Promise<SpaAccount> => {
@@ -348,10 +444,121 @@ export const updateSpaAccount = async (
   return data;
 };
 
+export const fetchServiceCategories = async (): Promise<ServiceCategory[]> => {
+  const { data } = await apiClient.get<ServiceCategory[]>('/api/v1/services/categories');
+  return data;
+};
+
+export const createServiceCategory = async (payload: { name: string; description?: string }): Promise<ServiceCategory> => {
+  const { data } = await apiClient.post<ServiceCategory>('/api/v1/services/categories', payload);
+  return data;
+};
+
+export const updateServiceCategory = async (id: string, payload: { name: string; description?: string; is_active?: boolean }): Promise<ServiceCategory> => {
+  const { data } = await apiClient.patch<ServiceCategory>(`/api/v1/services/categories/${id}`, payload);
+  return data;
+};
+
+export const deleteServiceCategory = async (id: string): Promise<void> => {
+  await apiClient.delete(`/api/v1/services/categories/${id}`);
+};
+
+export const fetchManagedServices = async (categoryId?: string): Promise<ManagedService[]> => {
+  const { data } = await apiClient.get<ManagedService[]>('/api/v1/services', {
+    params: categoryId ? { category_id: categoryId } : undefined,
+  });
+  return data;
+};
+
+export type ServicePayload = Omit<ManagedService, 'id' | 'category_name' | 'created_at' | 'updated_at'>;
+
+export const createManagedService = async (payload: ServicePayload): Promise<ManagedService> => {
+  const { data } = await apiClient.post<ManagedService>('/api/v1/services', payload);
+  return data;
+};
+
+export const updateManagedService = async (id: string, payload: ServicePayload): Promise<ManagedService> => {
+  const { data } = await apiClient.patch<ManagedService>(`/api/v1/services/${id}`, payload);
+  return data;
+};
+
+export const deleteManagedService = async (id: string): Promise<void> => {
+  await apiClient.delete(`/api/v1/services/${id}`);
+};
+
+export const bulkDeleteManagedServices = async (payload: {
+  service_ids?: string[];
+  delete_all?: boolean;
+}): Promise<{ deleted: number }> => {
+  const { data } = await apiClient.post<{ deleted: number }>(
+    "/api/v1/services/bulk-delete",
+    payload,
+  );
+  return data;
+};
+
+export type ProviderHealth = {
+  twilio: "connected" | "disconnected" | "not_configured";
+  grok: "connected" | "disconnected" | "not_configured";
+};
+
+export const fetchProviderHealth = async (): Promise<ProviderHealth> => {
+  const { data } = await apiClient.get<ProviderHealth>("/api/v1/health/providers");
+  return data;
+};
+
+export type BookingConnectionStatus =
+  | "connected"
+  | "not_configured"
+  | "authorization_required"
+  | "calendar_not_selected"
+  | "calendar_not_found"
+  | "insufficient_permissions"
+  | "token_expired_or_revoked"
+  | "google_api_error"
+  | "needs_attention"
+  | "connection_failed";
+
+export const testSpaBookingConnection = async (spaId: string): Promise<{ status: BookingConnectionStatus; missing: string[] }> => {
+  const { data } = await apiClient.post<{ status: BookingConnectionStatus; missing: string[] }>(
+    `/api/v1/spa-accounts/${spaId}/booking/test`
+  );
+  return data;
+};
+
+export const connectGoogleCalendar = async (spaId: string): Promise<{ authorization_url: string }> => {
+  const { data } = await apiClient.get<{ authorization_url: string }>(
+    `/api/v1/spa-accounts/${spaId}/booking/google/connect`
+  );
+  return data;
+};
+
+export const fetchGoogleCalendarStatus = async (spaId: string): Promise<GoogleCalendarStatus> => {
+  const { data } = await apiClient.get<GoogleCalendarStatus>(
+    `/api/v1/spa-accounts/${spaId}/booking/google/status`
+  );
+  return data;
+};
+
+export const fetchGoogleCalendars = async (spaId: string): Promise<{ status: string; calendars: GoogleCalendarOption[] }> => {
+  const { data } = await apiClient.get<{ status: string; calendars: GoogleCalendarOption[] }>(
+    `/api/v1/spa-accounts/${spaId}/booking/google/calendars`
+  );
+  return data;
+};
+
+export const selectGoogleCalendar = async (spaId: string, calendarId: string): Promise<void> => {
+  await apiClient.put(`/api/v1/spa-accounts/${spaId}/booking/google/calendar`, { calendar_id: calendarId });
+};
+
+export const disconnectGoogleCalendar = async (spaId: string): Promise<void> => {
+  await apiClient.post(`/api/v1/spa-accounts/${spaId}/booking/google/disconnect`);
+};
+
 // --- Contacts ---
 export const fetchContacts = async (): Promise<Contact[]> => {
   const { data } = await apiClient.get<Page<Contact>>("/api/v1/contacts");
-  return data.items;
+  return Array.isArray(data?.items) ? data.items : [];
 };
 
 export const createContact = async (contact: ContactInput): Promise<Contact> => {

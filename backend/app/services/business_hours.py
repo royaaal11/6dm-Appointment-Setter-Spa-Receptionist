@@ -67,6 +67,18 @@ def is_open_between(
     tz = resolve_timezone(tz_name)
     local_start = start.astimezone(tz)
     local_end = end.astimezone(tz)
+    duration_minutes = (end - start).total_seconds() / 60
+
+    logger.info(
+        "business_hours check: input_start=%s input_end=%s spa_tz=%s "
+        "local_start=%s local_end=%s duration_min=%s",
+        start.isoformat(),
+        end.isoformat(),
+        timezone_label(tz),
+        local_start.isoformat(),
+        local_end.isoformat(),
+        duration_minutes,
+    )
 
     # A window can't span midnight, so a booking that crosses days can't fit.
     if local_start.date() != local_end.date():

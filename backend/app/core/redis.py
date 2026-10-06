@@ -16,6 +16,10 @@ class RedisManager:
     @property
     def client(self) -> redis.Redis:
         if self._client is None:
+            logger.info(
+                "Redis connection source: %s",
+                "REDIS_URL" if settings.redis_uses_connection_url else "REDIS_HOST/REDIS_PORT",
+            )
             self._client = redis.from_url(
                 settings.REDIS_URL,
                 encoding="utf-8",

@@ -89,6 +89,7 @@ class CallLog(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     transcript: Mapped[str | None] = mapped_column(Text)
     recording_url: Mapped[str | None] = mapped_column(String(512))
     ai_summary: Mapped[str | None] = mapped_column(Text)
+    primary_language: Mapped[str | None] = mapped_column(String(64))
 
     # Structured extraction from the Grok pipeline (intent, entities, sentiment)
     ai_analysis: Mapped[dict[str, Any]] = mapped_column(

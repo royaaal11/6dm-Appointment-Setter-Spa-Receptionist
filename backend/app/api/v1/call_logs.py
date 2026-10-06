@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db, get_tenant_scope
-from app.core.tenancy import TenantScope, owns, scope_filter
+from app.core.tenancy import TenantScope, call_log_scope_filter, owns
 from app.models import CallDirection, CallLog, CallStatus
 from app.schemas import CallLogRead, Page
 
@@ -27,8 +27,8 @@ async def list_call_logs(
 ) -> Page[CallLogRead]:
     # Transcripts are the most sensitive thing in the system; this filter is
     # what stops one spa reading another's calls.
-    query = select(CallLog).where(scope_filter(scope, CallLog))
-    if direction:
+    query = select(CallLog).where(call_log_scope_filter(scope, CallLog))
+    if direction and scope.tenant_id is None:
         query = query.where(CallLog.direction == direction)
     if status_filter:
         query = query.where(CallLog.status == status_filter)
@@ -61,6 +61,8 @@ async def get_call_log(
         CallLog, call_log_id, options=[selectinload(CallLog.contact)]
     )
     if not call_log or not owns(scope, call_log):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Call log not found")
+    if scope.tenant_id is not None and call_log.direction is not CallDirection.INBOUND:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Call log not found")
     return call_log
 

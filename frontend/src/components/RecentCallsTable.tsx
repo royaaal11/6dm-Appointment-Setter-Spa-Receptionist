@@ -30,6 +30,16 @@ const sentimentOf = (log: CallLog): string | null => {
   return typeof value === "string" ? value : null;
 };
 
+const bookingOutcomeOf = (log: CallLog): string | null => {
+  const value = log.ai_analysis?.["booking_outcome"];
+  return typeof value === "string" ? value.replace(/_/g, " ") : null;
+};
+
+const callerLabelOf = (log: CallLog): string =>
+  log.contact?.full_name && log.contact.full_name !== "Unknown"
+    ? log.contact.full_name
+    : "Unknown caller";
+
 /** Call history with a transcript drawer. Rows are whatever the API returned,
  *  which is already filtered to the caller's tenant. */
 export default function RecentCallsTable({ logs }: { logs: CallLog[] }) {
@@ -46,6 +56,8 @@ export default function RecentCallsTable({ logs }: { logs: CallLog[] }) {
               <th className="px-4 py-3 font-semibold">Duration</th>
               <th className="px-4 py-3 font-semibold">Status</th>
               <th className="px-4 py-3 font-semibold">Sentiment</th>
+              <th className="px-4 py-3 font-semibold">Language</th>
+              <th className="px-4 py-3 font-semibold">Booking</th>
               <th className="px-4 py-3 font-semibold">When</th>
               <th className="px-4 py-3" />
             </tr>
@@ -59,7 +71,7 @@ export default function RecentCallsTable({ logs }: { logs: CallLog[] }) {
               >
                 <td className="px-5 py-4">
                   <p className="text-xs font-semibold text-slate-200">
-                    {log.contact?.full_name || "Unknown caller"}
+                    {callerLabelOf(log)}
                   </p>
                   <p className="mt-0.5 text-[10px] text-slate-500">
                     {counterpartyNumber(log)}
@@ -94,6 +106,12 @@ export default function RecentCallsTable({ logs }: { logs: CallLog[] }) {
                 <td className="px-4 py-4 text-xs text-slate-400">
                   {sentimentOf(log) || "—"}
                 </td>
+                <td className="px-4 py-4 text-xs text-slate-400">
+                  {log.direction === "inbound" ? log.primary_language || "—" : "—"}
+                </td>
+                <td className="px-4 py-4 text-xs capitalize text-slate-400">
+                  {bookingOutcomeOf(log) || "—"}
+                </td>
                 <td className="px-4 py-4 text-xs text-slate-500">
                   {new Date(log.created_at).toLocaleString()}
                 </td>
@@ -115,12 +133,17 @@ export default function RecentCallsTable({ logs }: { logs: CallLog[] }) {
                   Conversation detail
                 </p>
                 <h2 className="font-display text-xl font-semibold text-white">
-                  {selected.contact?.full_name || "Unknown caller"}
+                  {callerLabelOf(selected)}
                 </h2>
                 <p className="mt-1 text-xs text-slate-500">
                   {counterpartyNumber(selected)} ·{" "}
                   {new Date(selected.created_at).toLocaleString()}
                 </p>
+                {selected.direction === "inbound" && selected.primary_language && (
+                  <p className="mt-2 text-xs text-cyan-300">
+                    Primary language: {selected.primary_language}
+                  </p>
+                )}
               </div>
               <button
                 onClick={() => setSelected(null)}
@@ -142,6 +165,37 @@ export default function RecentCallsTable({ logs }: { logs: CallLog[] }) {
                   </p>
                 </section>
               )}
+
+              <section className="grid gap-3 rounded-xl border border-slate-800 bg-[#07111f] p-4 sm:grid-cols-2">
+                <div>
+                  <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</h3>
+                  <p className="mt-1 text-xs capitalize text-slate-300">{selected.status.replace(/_/g, " ")}</p>
+                </div>
+                <div>
+                  <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Duration</h3>
+                  <p className="mt-1 text-xs text-slate-300">{formatDuration(selected.duration_seconds)}</p>
+                </div>
+                <div>
+                  <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Booking result</h3>
+                  <p className="mt-1 text-xs capitalize text-slate-300">{bookingOutcomeOf(selected) || "No booking"}</p>
+                </div>
+                <div>
+                  <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Linked contact</h3>
+                  <p className="mt-1 text-xs text-slate-300">{selected.contact?.full_name || "None"}</p>
+                </div>
+                {selected.direction === "inbound" && (
+                  <div>
+                    <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Primary language</h3>
+                    <p className="mt-1 text-xs text-slate-300">{selected.primary_language || "Not detected"}</p>
+                  </div>
+                )}
+                {typeof selected.ai_analysis?.["linked_appointment_id"] === "string" && (
+                  <div>
+                    <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Linked appointment</h3>
+                    <p className="mt-1 break-all text-xs text-slate-300">{selected.ai_analysis["linked_appointment_id"] as string}</p>
+                  </div>
+                )}
+              </section>
 
               {selected.recording_url && (
                 <section className="rounded-xl border border-slate-800 bg-[#07111f] p-4">

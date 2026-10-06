@@ -11,9 +11,10 @@ migration against a real Postgres, not from here.
 """
 import uuid
 from collections.abc import Iterator
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 
 from app.core.database import get_db
@@ -87,17 +88,31 @@ def client(principal: _Principal) -> Iterator[TestClient]:
     from app.api import deps
 
     async def _current_user() -> User:
-        assert principal.user is not None, "test forgot to set principal.user"
+        if principal.user is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
         return principal.user
 
     async def _db():
-        # Any query is a failure: every assertion here should be decided by the
-        # role check before the handler body runs.
+        # Default tenant resolution is a simple tenant record so auth and browser
+        # token tests can exercise the real route logic without a live database.
+        async def _session_get(model, pk):
+            if model is SpaAccount and principal.user is not None and principal.user.tenant_id is not None:
+                return make_spa(id=principal.user.tenant_id, name="Test Spa")
+            return None
+
         session = MagicMock(name="AsyncSession")
+        session.get = AsyncMock(side_effect=_session_get)
         yield session
 
     async def _redis():
-        return MagicMock(name="Redis")
+        redis = MagicMock(name="Redis")
+        redis.get = AsyncMock(return_value=None)
+        redis.set = AsyncMock()
+        redis.sadd = AsyncMock()
+        redis.srem = AsyncMock()
+        redis.expire = AsyncMock()
+        redis.smembers = AsyncMock(return_value=set())
+        return redis
 
     app.dependency_overrides[deps.get_current_user] = _current_user
     app.dependency_overrides[get_db] = _db

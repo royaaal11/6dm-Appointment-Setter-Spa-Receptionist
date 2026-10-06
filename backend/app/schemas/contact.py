@@ -14,6 +14,14 @@ class ContactBase(BaseModel):
     email: EmailStr | None = None
     extra_metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = v.strip()
+        return value or None
+
     @field_validator("phone_number")
     @classmethod
     def normalize_phone(cls, v: str) -> str:
@@ -35,14 +43,35 @@ class ContactUpdate(BaseModel):
     extra_metadata: dict[str, Any] | None = None
 
 
-class ContactRead(ORMModel, ContactBase):
+class ContactRead(ORMModel):
+    """Dashboard/API view of a stored contact.
+
+    Intentionally does not reuse ContactBase validators: a single receptionist
+    row with a non-E.164 phone or a spoken non-email would otherwise make
+    GET /contacts 500 and the spa dashboard show "Unable to load guests."
+    """
+
     id: uuid.UUID
-    # Exactly one of these is set: `owner_id` for a 6DM sales lead, `tenant_id`
-    # for a spa guest created by the receptionist.
     owner_id: uuid.UUID | None
     tenant_id: uuid.UUID | None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str
+    email: str | None = None
+    extra_metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
-    # Read-only convenience field backed by Contact.full_name; the telephony
-    # pipeline and the dashboard both address contacts by display name.
-    full_name: str
+    full_name: str = "Unknown"
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
+    @field_validator("extra_metadata", mode="before")
+    @classmethod
+    def normalize_metadata(cls, v: dict[str, Any] | None) -> dict[str, Any]:
+        return v or {}

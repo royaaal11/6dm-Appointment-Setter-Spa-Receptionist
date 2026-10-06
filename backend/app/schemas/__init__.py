@@ -34,6 +34,14 @@ from app.schemas.analytics import (
     CallVolume,
     SentimentBreakdown,
 )
+from app.schemas.service import (
+    ServiceCategoryCreate,
+    ServiceCategoryRead,
+    ServiceCategoryUpdate,
+    ServiceCreate,
+    ServiceRead,
+    ServiceUpdate,
+)
 
 __all__ = [
     "ORMModel", "Page",
@@ -44,4 +52,6 @@ __all__ = [
     "BusinessHoursWindow", "SpaAccountCreate", "SpaAccountRead", "SpaAccountSummary",
     "SpaAccountUpdate", "SpaService", "SpaStaffMember",
     "AnalyticsSummary", "BookingVolume", "CallVolume", "SentimentBreakdown",
+    "ServiceCategoryCreate", "ServiceCategoryRead", "ServiceCategoryUpdate",
+    "ServiceCreate", "ServiceRead", "ServiceUpdate",
 ]

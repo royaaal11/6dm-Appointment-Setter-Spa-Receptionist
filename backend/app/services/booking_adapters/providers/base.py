@@ -23,6 +23,11 @@ class VerticalProviderAdapter(BookingAdapter):
     required_config_keys: tuple[str, ...] = ()
     #: False until a real API client is written for this provider.
     implemented: bool = False
+    #: Stubs have no customer directory until that adapter is actually built.
+    supports_customer_lookup = False
+    supports_customer_creation = False
+    supports_saved_payment_method_lookup = False
+    supports_save_card_on_file = False
     #: Docs for whoever picks the integration up next.
     api_docs: str = ""
 

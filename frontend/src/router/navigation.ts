@@ -7,6 +7,7 @@ import {
   PhoneCall,
   Target,
   UsersRound,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { UserRole } from "../api/client";
@@ -108,11 +109,18 @@ export const NAV_SECTIONS: NavSection[] = [
         description: "People who have called in",
       },
       {
+        label: "Services",
+        path: "/spa/services",
+        icon: Sparkles,
+        roles: SPA_VIEWERS,
+        description: "Service menu and categories",
+      },
+      {
         label: "Receptionist settings",
         path: "/spa/settings",
         icon: Cog,
         roles: SPA_VIEWERS,
-        description: "Prompt, services, staff and hours",
+        description: "Prompt, staff and hours",
       },
     ],
   },

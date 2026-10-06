@@ -1,15 +1,25 @@
 import { useEffect, useState } from "react";
-import { Lock, Phone, Save } from "lucide-react";
+import { Link, Lock, Phone, RefreshCw, Save, TestTube, Unlink } from "lucide-react";
 import {
   fetchMySpaAccount,
   fetchSpaAccount,
   updateSpaAccount,
   type BookingProvider,
   type SpaAccount,
+  testSpaBookingConnection,
+  connectGoogleCalendar,
+  disconnectGoogleCalendar,
+  fetchGoogleCalendarStatus,
+  fetchGoogleCalendars,
+  selectGoogleCalendar,
+  type GoogleCalendarOption,
+  type GoogleCalendarStatus,
+  getApiErrorMessage,
 } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { canEditSpaSettings } from "../../auth/roles";
 import { PageHeader, Panel, StateBlock } from "../../components/ui/Primitives";
+
 
 const PROVIDERS: BookingProvider[] = [
   "google_calendar",
@@ -19,6 +29,20 @@ const PROVIDERS: BookingProvider[] = [
   "vagaro",
   "zenoti",
 ];
+
+const PROVIDER_FIELDS: Record<BookingProvider, { key: string; label: string; secret?: boolean }[]> = {
+  google_calendar: [],
+  mindbody: [
+    { key: "site_id", label: "Site ID" },
+    { key: "api_key", label: "API key", secret: true },
+    { key: "source_name", label: "Source name" },
+    { key: "source_password", label: "Source password", secret: true },
+  ],
+  mangomint: [{ key: "api_key", label: "API key", secret: true }, { key: "location_id", label: "Location ID" }],
+  square: [{ key: "access_token", label: "Access token", secret: true }, { key: "location_id", label: "Location ID" }, { key: "application_id", label: "Application ID" }],
+  vagaro: [{ key: "api_key", label: "API key", secret: true }, { key: "business_id", label: "Business ID" }],
+  zenoti: [{ key: "api_key", label: "API key", secret: true }, { key: "center_id", label: "Center ID" }],
+};
 
 const DAYS: [string, string][] = [
   ["mon", "Monday"],
@@ -45,6 +69,10 @@ export default function SpaSettings() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
+  const [googleStatus, setGoogleStatus] = useState<GoogleCalendarStatus | null>(null);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarOption[]>([]);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -58,13 +86,80 @@ export default function SpaSettings() {
         setSpa(account);
         setError(null);
       })
-      .catch(() =>
-        setError(
-          "No spa account is attached to this view. Pick one from the tenant switcher."
-        )
-      )
+      .catch((err: unknown) => setError(getApiErrorMessage(
+        err,
+        "No spa account is attached to this view. Pick one from the tenant switcher."
+      )))
       .finally(() => setLoading(false));
   }, [impersonatedTenantId, effectiveTenantId]);
+
+  useEffect(() => {
+    if (!spa || spa.booking_provider !== "google_calendar") {
+      setGoogleStatus(null);
+      setGoogleCalendars([]);
+      return;
+    }
+    fetchGoogleCalendarStatus(spa.id)
+      .then((value) => {
+        setGoogleStatus(value);
+        if (value.connected) return fetchGoogleCalendars(spa.id);
+        return null;
+      })
+      .then((value) => {
+        if (value) setGoogleCalendars(value.calendars);
+      })
+      .catch(() => setGoogleStatus(null));
+  }, [spa?.id, spa?.booking_provider]);
+
+  const startGoogleConnect = async () => {
+    if (!spa) return;
+    setGoogleBusy(true);
+    try {
+      const { authorization_url } = await connectGoogleCalendar(spa.id);
+      window.location.assign(authorization_url);
+    } catch {
+      setConnectionStatus("authorization required");
+      setGoogleBusy(false);
+    }
+  };
+
+  const refreshGoogleCalendars = async () => {
+    if (!spa) return;
+    setGoogleBusy(true);
+    try {
+      const value = await fetchGoogleCalendars(spa.id);
+      setGoogleCalendars(value.calendars);
+      setGoogleStatus((current) => current ? { ...current, status: value.status } : current);
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
+
+  const chooseGoogleCalendar = async (calendarId: string) => {
+    if (!spa || !calendarId) return;
+    setGoogleBusy(true);
+    try {
+      await selectGoogleCalendar(spa.id, calendarId);
+      setGoogleStatus((current) => current ? { ...current, selected_calendar_id: calendarId, status: "connected" } : current);
+      patch("booking_config", { ...spa.booking_config, google_calendar_id: calendarId });
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
+
+  const disconnectGoogle = async () => {
+    if (!spa) return;
+    setGoogleBusy(true);
+    try {
+      await disconnectGoogleCalendar(spa.id);
+      setGoogleStatus({ status: "not_configured", connected: false, google_account_email: null, selected_calendar_id: null, last_tested_at: null });
+      setGoogleCalendars([]);
+      patch("booking_config", {});
+      setConnectionStatus(null);
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
 
   const patch = <K extends keyof SpaAccount>(key: K, value: SpaAccount[K]) => {
     setSpa((current) => (current ? { ...current, [key]: value } : current));
@@ -80,6 +175,7 @@ export default function SpaSettings() {
     patch("business_hours", next);
   };
 
+
   const save = async () => {
     if (!spa) return;
     setSaving(true);
@@ -87,20 +183,27 @@ export default function SpaSettings() {
     try {
       const updated = await updateSpaAccount(spa.id, {
         name: spa.name,
+        location: spa.location ?? "",
         grok_system_prompt: spa.grok_system_prompt,
         business_hours: spa.business_hours,
         services: spa.services,
         staff: spa.staff,
         timezone: spa.timezone,
         booking_provider: spa.booking_provider,
+        booking_config: spa.booking_config,
         twiml_voice: spa.twiml_voice,
+        description: spa.description,
+        public_phone: spa.public_phone,
+        cancellation_policy: spa.cancellation_policy,
+        amenities: spa.amenities ?? [],
+        packages: spa.packages ?? [],
+        upsell_rules: spa.upsell_rules ?? [],
+        payment_policy: spa.payment_policy ?? { card_required: false, collection_mode: "none" },
       });
       setSpa(updated);
       setSaved(true);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response
-        ?.data?.detail;
-      setError(detail || "Unable to save settings.");
+      setError(getApiErrorMessage(err, "Unable to save settings."));
     } finally {
       setSaving(false);
     }
@@ -152,6 +255,42 @@ export default function SpaSettings() {
                 />
               </label>
 
+              <label className="block">
+                <span className="mb-2 block text-xs font-medium text-slate-400">
+                  Business location
+                </span>
+
+                <input
+                  value={spa.location ?? ""}
+                  disabled={!editable}
+                  onChange={(event) => patch("location", event.target.value)}
+                  placeholder="e.g. 123 Main Street, City, State"
+                  className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-white outline-none disabled:opacity-60"
+                />
+              </label>
+
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-medium text-slate-400">Public phone</span>
+                <input
+                  value={spa.public_phone ?? ""}
+                  disabled={!editable}
+                  onChange={(event) => patch("public_phone", event.target.value)}
+                  placeholder="Shown to callers when they ask for your number"
+                  className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-white outline-none disabled:opacity-60"
+                />
+              </label>
+
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-medium text-slate-400">Business description</span>
+                <textarea
+                  rows={3}
+                  value={spa.description ?? ""}
+                  disabled={!editable}
+                  onChange={(event) => patch("description", event.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-white outline-none disabled:opacity-60"
+                />
+              </label>
+
               <div className="mt-4">
                 <span className="mb-2 block text-xs font-medium text-slate-400">
                   Inbound number
@@ -192,9 +331,11 @@ export default function SpaSettings() {
                 <select
                   value={spa.booking_provider}
                   disabled={!editable}
-                  onChange={(event) =>
-                    patch("booking_provider", event.target.value as BookingProvider)
-                  }
+                  onChange={(event) => {
+                    patch("booking_provider", event.target.value as BookingProvider);
+                    patch("booking_config", {});
+                    setConnectionStatus(null);
+                  }}
                   className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-slate-200 outline-none disabled:opacity-60"
                 >
                   {PROVIDERS.map((provider) => (
@@ -205,11 +346,112 @@ export default function SpaSettings() {
                 </select>
                 {!spa.booking_provider_configured && (
                   <span className="mt-1.5 block text-[10px] text-amber-300">
-                    Credentials for this provider are not in place yet. Bookings are
-                    held on your calendar until 6DM connects it — nothing is lost.
+                    This provider is not ready. Inbound bookings will be refused
+                    until the required configuration is complete.
                   </span>
                 )}
               </label>
+            </Panel>
+
+            <Panel title="Booking Integration" subtitle="Only this spa's provider configuration is used for inbound bookings.">
+              <div className="space-y-3">
+                {spa.booking_provider === "google_calendar" ? (
+                  <div className="space-y-3">
+                    {googleStatus?.connected ? (
+                      <>
+                        <div className="flex items-center justify-between gap-3 text-xs text-slate-300">
+                          <span>Connected as <strong className="text-white">{googleStatus.google_account_email ?? "Google account"}</strong></span>
+                          <span className="text-emerald-300">{googleStatus.status.replace(/_/g, " ")}</span>
+                        </div>
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-medium text-slate-400">Calendar</span>
+                          <select
+                            value={googleStatus.selected_calendar_id ?? ""}
+                            disabled={!editable || googleBusy || googleCalendars.length === 0}
+                            onChange={(event) => void chooseGoogleCalendar(event.target.value)}
+                            className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-white outline-none disabled:opacity-60"
+                          >
+                            <option value="">Select a calendar</option>
+                            {googleCalendars.map((calendar) => (
+                              <option key={calendar.id} value={calendar.id}>{calendar.summary}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-slate-700 px-3 py-3">
+                        <span className="text-xs text-slate-400">Google Calendar is not connected.</span>
+                        {editable && (
+                          <button type="button" disabled={googleBusy} onClick={() => void startGoogleConnect()} className="inline-flex items-center gap-2 rounded-lg border border-cyan-400/40 px-3 py-2 text-[11px] font-semibold text-cyan-300 disabled:opacity-50">
+                            <Link size={14} /> Connect Google Calendar
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {googleStatus?.connected && editable && (
+                        <>
+                          <button type="button" disabled={googleBusy} onClick={() => void refreshGoogleCalendars()} title="Refresh accessible calendars" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-[11px] font-semibold text-slate-300 disabled:opacity-50">
+                            <RefreshCw size={14} /> Refresh calendars
+                          </button>
+                          <button type="button" disabled={googleBusy} onClick={() => void disconnectGoogle()} title="Disconnect Google Calendar" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-[11px] font-semibold text-slate-300 disabled:opacity-50">
+                            <Unlink size={14} /> Disconnect
+                          </button>
+                        </>
+                      )}
+                      {editable && (
+                        <button
+                          type="button"
+                          onClick={() => testSpaBookingConnection(spa.id).then((result) => setConnectionStatus(result.missing.length ? `Not configured: ${result.missing.join(", ")}` : result.status.replace("_", " "))).catch(() => setConnectionStatus("connection failed"))}
+                          className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-[11px] font-semibold text-slate-300 hover:border-cyan-400/40 hover:text-cyan-300"
+                        >
+                          <TestTube size={14} /> Test connection
+                        </button>
+                      )}
+                      <span className="text-[11px] capitalize text-slate-400">Status: {connectionStatus ?? googleStatus?.status?.replace(/_/g, " ") ?? "not connected"}</span>
+                    </div>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-500">Legacy Calendar ID</span>
+                      <input
+                        type="text"
+                        value={spa.booking_config?.google_calendar_id ?? ""}
+                        disabled={!editable || Boolean(googleStatus?.connected)}
+                        onChange={(event) => patch("booking_config", { ...spa.booking_config, google_calendar_id: event.target.value })}
+                        placeholder="Used only for backwards compatibility"
+                        className="w-full rounded-lg border border-slate-800 bg-[#07111f] px-3 py-2.5 text-sm text-slate-400 outline-none disabled:opacity-60"
+                      />
+                    </label>
+                  </div>
+                ) : PROVIDER_FIELDS[spa.booking_provider].map((field) => (
+                  <label key={field.key} className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-slate-400">{field.label}</span>
+                    <input
+                      type={field.secret ? "password" : "text"}
+                      value={spa.booking_config?.[field.key] ?? ""}
+                      disabled={!editable}
+                      onChange={(event) => patch("booking_config", { ...spa.booking_config, [field.key]: event.target.value })}
+                      placeholder={field.secret ? "Enter a new secret" : undefined}
+                      className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-white outline-none disabled:opacity-60"
+                    />
+                  </label>
+                ))}
+                {spa.booking_provider !== "google_calendar" && (
+                <div className="flex items-center gap-3 pt-1">
+                  {editable && (
+                    <button
+                      type="button"
+                      onClick={() => testSpaBookingConnection(spa.id).then((result) => setConnectionStatus(result.missing.length ? `Not configured: ${result.missing.join(", ")}` : result.status.replace("_", " "))).catch(() => setConnectionStatus("connection failed"))}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-[11px] font-semibold text-slate-300 hover:border-cyan-400/40 hover:text-cyan-300"
+                    >
+                      <TestTube size={14} /> Test connection
+                    </button>
+                  )}
+                  <span className="text-[11px] capitalize text-slate-400">
+                    Status: {connectionStatus ?? (spa.booking_provider_configured ? "configured" : "not configured")}
+                  </span>
+                </div>
+                )}
+              </div>
             </Panel>
 
             <Panel
@@ -257,62 +499,6 @@ export default function SpaSettings() {
               </div>
             </Panel>
 
-            <Panel title="Service menu" subtitle="Names and durations the agent quotes.">
-              <div className="space-y-2">
-                {spa.services.map((service, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <input
-                      value={service.name}
-                      disabled={!editable}
-                      onChange={(event) =>
-                        patch(
-                          "services",
-                          spa.services.map((item, i) =>
-                            i === index ? { ...item, name: event.target.value } : item
-                          )
-                        )
-                      }
-                      className="flex-1 rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2 text-xs text-slate-200 outline-none disabled:opacity-60"
-                    />
-                    <input
-                      type="number"
-                      min={5}
-                      value={service.duration_minutes}
-                      disabled={!editable}
-                      onChange={(event) =>
-                        patch(
-                          "services",
-                          spa.services.map((item, i) =>
-                            i === index
-                              ? { ...item, duration_minutes: Number(event.target.value) }
-                              : item
-                          )
-                        )
-                      }
-                      className="w-20 rounded-lg border border-slate-700 bg-[#07111f] px-2 py-2 text-xs text-slate-200 outline-none disabled:opacity-60"
-                    />
-                    <span className="text-[10px] text-slate-600">min</span>
-                  </div>
-                ))}
-                {editable && (
-                  <button
-                    onClick={() =>
-                      patch("services", [
-                        ...spa.services,
-                        { name: "", duration_minutes: 60 },
-                      ])
-                    }
-                    className="mt-2 w-full rounded-lg border border-slate-700 py-2 text-[11px] font-semibold text-slate-400 hover:border-cyan-400/40 hover:text-cyan-300"
-                  >
-                    Add service
-                  </button>
-                )}
-                {spa.services.length === 0 && !editable && (
-                  <p className="text-[11px] text-slate-500">No services configured.</p>
-                )}
-              </div>
-            </Panel>
-
             <Panel
               title="Team"
               subtitle="Also sets how many appointments can run at once."
@@ -348,6 +534,28 @@ export default function SpaSettings() {
                       placeholder="Role"
                       className="flex-1 rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2 text-xs text-slate-200 outline-none disabled:opacity-60"
                     />
+                    <input
+                      value={(member.services ?? []).join(", ")}
+                      disabled={!editable}
+                      onChange={(event) =>
+                        patch(
+                          "staff",
+                          spa.staff.map((item, i) =>
+                            i === index
+                              ? {
+                                  ...item,
+                                  services: event.target.value
+                                    .split(",")
+                                    .map((part) => part.trim())
+                                    .filter(Boolean),
+                                }
+                              : item
+                          )
+                        )
+                      }
+                      placeholder="Services: facial, massage, back"
+                      className="flex-[1.4] rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2 text-xs text-slate-200 outline-none disabled:opacity-60"
+                    />
                   </div>
                 ))}
                 {editable && (
@@ -358,6 +566,128 @@ export default function SpaSettings() {
                     className="mt-2 w-full rounded-lg border border-slate-700 py-2 text-[11px] font-semibold text-slate-400 hover:border-cyan-400/40 hover:text-cyan-300"
                   >
                     Add team member
+                  </button>
+                )}
+              </div>
+            </Panel>
+
+            <Panel title="Policies, upsells, and Booking CC" subtitle="The receptionist may only quote these configured facts. It will never invent packages, prices, or card rules.">
+              <label className="block">
+                <span className="mb-2 block text-xs font-medium text-slate-400">Cancellation policy</span>
+                <textarea
+                  rows={3}
+                  value={spa.cancellation_policy ?? ""}
+                  disabled={!editable}
+                  onChange={(event) => patch("cancellation_policy", event.target.value)}
+                  placeholder="Leave blank if the receptionist should say it cannot verify a policy."
+                  className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-white outline-none disabled:opacity-60"
+                />
+              </label>
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-medium text-slate-400">Amenities (one per line)</span>
+                <textarea
+                  rows={3}
+                  value={(spa.amenities ?? []).join("\n")}
+                  disabled={!editable}
+                  onChange={(event) =>
+                    patch(
+                      "amenities",
+                      event.target.value.split("\n").map((line) => line.trim()).filter(Boolean)
+                    )
+                  }
+                  className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-white outline-none disabled:opacity-60"
+                />
+              </label>
+              <label className="mt-4 flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(spa.payment_policy?.card_required)}
+                  disabled={!editable}
+                  onChange={(event) =>
+                    patch("payment_policy", {
+                      ...(spa.payment_policy ?? { card_required: false, collection_mode: "none" }),
+                      card_required: event.target.checked,
+                    })
+                  }
+                />
+                Card required (Booking CC)
+              </label>
+              <p className="mt-1 text-[10px] text-slate-500">
+                Booking CC is the spa&apos;s card-on-file policy. The AI never takes a card number by voice.
+              </p>
+              <label className="mt-3 block">
+                <span className="mb-1.5 block text-xs font-medium text-slate-400">Card collection mode</span>
+                <select
+                  value={spa.payment_policy?.collection_mode ?? "none"}
+                  disabled={!editable}
+                  onChange={(event) =>
+                    patch("payment_policy", {
+                      ...(spa.payment_policy ?? { card_required: false, collection_mode: "none" }),
+                      collection_mode: event.target.value as "none" | "at_spa" | "square_link" | "secure_sms_link",
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2.5 text-sm text-slate-200 outline-none disabled:opacity-60"
+                >
+                  <option value="none">None — do not ask for a card</option>
+                  <option value="at_spa">Taken at the spa</option>
+                  <option value="square_link">Square secure link (never spoken PAN)</option>
+                  <option value="secure_sms_link">Secure SMS link — save card on file, no charge</option>
+                </select>
+              </label>
+              <div className="mt-4 space-y-2">
+                <span className="block text-xs font-medium text-slate-400">Upsell rules</span>
+                {(spa.upsell_rules ?? []).map((rule, index) => (
+                  <div key={index} className="space-y-1 rounded-lg border border-slate-800 p-2">
+                    <input
+                      value={rule.base_service}
+                      disabled={!editable}
+                      placeholder="Base service, e.g. HydroLux5 Facial - Face Only"
+                      onChange={(event) =>
+                        patch(
+                          "upsell_rules",
+                          (spa.upsell_rules ?? []).map((item, i) =>
+                            i === index ? { ...item, base_service: event.target.value } : item
+                          )
+                        )
+                      }
+                      className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2 text-xs text-slate-200 outline-none disabled:opacity-60"
+                    />
+                    <input
+                      value={(rule.allowed_upsells ?? []).join(", ")}
+                      disabled={!editable}
+                      placeholder="Allowed upsells, comma-separated"
+                      onChange={(event) =>
+                        patch(
+                          "upsell_rules",
+                          (spa.upsell_rules ?? []).map((item, i) =>
+                            i === index
+                              ? {
+                                  ...item,
+                                  allowed_upsells: event.target.value
+                                    .split(",")
+                                    .map((part) => part.trim())
+                                    .filter(Boolean),
+                                }
+                              : item
+                          )
+                        )
+                      }
+                      className="w-full rounded-lg border border-slate-700 bg-[#07111f] px-3 py-2 text-xs text-slate-200 outline-none disabled:opacity-60"
+                    />
+                  </div>
+                ))}
+                {editable && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patch("upsell_rules", [
+                        ...(spa.upsell_rules ?? []),
+                        { base_service: "", allowed_upsells: [] },
+                      ])
+                    }
+                    className="w-full rounded-lg border border-slate-700 py-2 text-[11px] font-semibold text-slate-400 hover:border-cyan-400/40 hover:text-cyan-300"
+                  >
+                    Add upsell rule
                   </button>
                 )}
               </div>

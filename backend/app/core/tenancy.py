@@ -53,6 +53,14 @@ def scope_filter(scope: TenantScope, model: Any) -> ColumnElement[bool]:
     return and_(model.tenant_id.is_(None), _owner_column(model) == scope.owner_id)
 
 
+def call_log_scope_filter(scope: TenantScope, model: Any) -> ColumnElement[bool]:
+    """Scope call logs and hide sales calls from every spa tenant."""
+    clause = scope_filter(scope, model)
+    if scope.tenant_id is not None:
+        clause = and_(clause, model.direction == "inbound")
+    return clause
+
+
 def scope_columns(scope: TenantScope, model: Any) -> dict[str, Any]:
     """INSERT kwargs that place a new row inside `scope`.
 

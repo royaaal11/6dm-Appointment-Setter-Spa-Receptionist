@@ -48,11 +48,13 @@ def test_prompt_carries_the_service_menu(prompt):
     assert "60 minutes" in prompt
     assert "$120" in prompt
     assert "Signature facial" in prompt
+    assert "[AUTHORITATIVE SPA FACTS — SERVICE MENU]" in prompt
 
 
 def test_prompt_carries_the_team(prompt):
     assert "Riley (Massage therapist)" in prompt
     assert "Ash (Esthetician)" in prompt
+    assert "[AUTHORITATIVE SPA FACTS — TEAM]" in prompt
 
 
 def test_prompt_carries_hours_in_the_tenants_timezone(prompt):
@@ -62,8 +64,11 @@ def test_prompt_carries_hours_in_the_tenants_timezone(prompt):
     assert "America/Los_Angeles" in prompt
 
 
-def test_prompt_forbids_booking_outside_hours(prompt):
-    assert "Never book outside the opening hours" in prompt
+def test_prompt_forbids_inventing_availability_from_hours(prompt):
+    """Opening hours limit the day. They are not a list of open appointments."""
+    assert "Opening hours are a hard limit." in prompt
+    assert "Never offer or book a time before open or after close" in prompt
+    assert "Inside those hours, only times the booking tool returns are real." in prompt
 
 
 def test_a_bare_spa_row_still_produces_a_usable_prompt():

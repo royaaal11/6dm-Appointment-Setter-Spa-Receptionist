@@ -1,4 +1,9 @@
+import base64
+import binascii
+import hashlib
+import hmac
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -52,6 +57,81 @@ async def verify_twilio_signature(request: Request) -> None:
     if not _validator.validate(url, params, signature):
         logger.warning("Twilio signature validation FAILED for %s", url)
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Invalid Twilio signature")
+
+
+# --------------------------------------------------------------------------- #
+# xAI voice webhook security (Standard Webhooks)
+# --------------------------------------------------------------------------- #
+def _xai_signing_key(secret: str) -> bytes:
+    """The HMAC key behind a Standard Webhooks `whsec_<base64>` secret.
+
+    Falls back to the raw bytes when the value isn't base64, so a secret pasted
+    without the prefix (or in a non-standard encoding) still verifies rather
+    than silently rejecting every delivery.
+    """
+    raw = secret[len("whsec_") :] if secret.startswith("whsec_") else secret
+    try:
+        return base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        return raw.encode()
+
+
+async def verify_xai_voice_signature(request: Request) -> None:
+    """Authenticate a `realtime.call.incoming` delivery from xAI.
+
+    Signed payload is `{webhook-id}.{webhook-timestamp}.{raw body}`, HMAC-SHA256
+    under the signing secret returned when the number was registered. Reading
+    the body here is safe: Starlette caches it, so the handler still sees it.
+    """
+    secret = settings.XAI_VOICE_WEBHOOK_SECRET
+    if not secret:
+        # Unsigned webhooks would let anyone start a voice session on our
+        # account, so this is fatal in production and a loud warning in dev.
+        if settings.APP_ENV == "production":
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="XAI_VOICE_WEBHOOK_SECRET must be set in production.",
+            )
+        logger.warning(
+            "xAI voice webhook signature check SKIPPED: no XAI_VOICE_WEBHOOK_SECRET set."
+        )
+        return
+
+    webhook_id = request.headers.get("webhook-id", "")
+    timestamp = request.headers.get("webhook-timestamp", "")
+    signature_header = request.headers.get("webhook-signature", "")
+    if not (webhook_id and timestamp and signature_header):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail="Missing xAI webhook signature headers"
+        )
+
+    try:
+        age = abs(time.time() - int(timestamp))
+    except ValueError:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Malformed webhook-timestamp")
+    if age > settings.XAI_WEBHOOK_TOLERANCE_SECONDS:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail="Webhook timestamp outside tolerance window"
+        )
+
+    body = await request.body()
+    signed = b".".join([webhook_id.encode(), timestamp.encode(), body])
+    expected = base64.b64encode(
+        hmac.new(_xai_signing_key(secret), signed, hashlib.sha256).digest()
+    ).decode()
+
+    # The header carries one or more space-separated `v1,<base64>` pairs; during
+    # a secret rotation more than one is present and any may match.
+    presented = [
+        part.split(",", 1)[1]
+        for part in signature_header.split()
+        if part.startswith("v1,")
+    ]
+    if not any(hmac.compare_digest(expected, candidate) for candidate in presented):
+        logger.warning("xAI webhook signature validation FAILED for id=%s", webhook_id)
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail="Invalid xAI webhook signature"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -196,6 +276,7 @@ def get_call_state_store(redis: Redis = Depends(get_redis)) -> CallStateStore:
 
 __all__ = [
     "verify_twilio_signature",
+    "verify_xai_voice_signature",
     "get_current_user",
     "get_current_active_user",
     "get_optional_current_user",

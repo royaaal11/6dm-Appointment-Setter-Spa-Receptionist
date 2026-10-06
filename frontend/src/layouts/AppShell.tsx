@@ -1,20 +1,22 @@
-import { useState } from "react";
-import { Menu, ShieldCheck, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Menu, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { Outlet } from "react-router-dom";
 import TenantSwitcher from "../components/Nav/TenantSwitcher";
 import Sidebar from "../components/Nav/Sidebar";
 import { useAuth } from "../auth/AuthContext";
 import { canSwitchTenant, isSpaRole } from "../auth/roles";
+import { fetchProviderHealth, type ProviderHealth } from "../api/client";
 
 function StatusDot({ label, detail }: { label: string; detail: string }) {
+  const connected = detail === "Connected" || detail === "Active";
   return (
     <div className="flex items-center gap-2 border-r border-slate-800 pr-4 last:border-0 last:pr-0">
       <span className="relative flex h-2 w-2">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+        <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${connected ? "bg-emerald-400" : "bg-rose-400"} opacity-60`} />
+        <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? "bg-emerald-400" : "bg-rose-400"}`} />
       </span>
       <span className="text-[11px] font-medium text-slate-300">{label}</span>
-      <span className="text-[10px] text-emerald-400">{detail}</span>
+      <span className={`text-[10px] ${connected ? "text-emerald-400" : "text-rose-400"}`}>{detail}</span>
     </div>
   );
 }
@@ -22,6 +24,24 @@ function StatusDot({ label, detail }: { label: string; detail: string }) {
 export default function AppShell() {
   const { role, impersonatedTenantId } = useAuth();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [providerHealth, setProviderHealth] = useState<ProviderHealth | null>(null);
+  const [refreshingProviders, setRefreshingProviders] = useState(false);
+
+  const refreshProviderStatus = async () => {
+    if (refreshingProviders) return;
+    setRefreshingProviders(true);
+    try {
+      setProviderHealth(await fetchProviderHealth());
+    } catch {
+      setProviderHealth({ twilio: "disconnected", grok: "disconnected" });
+    } finally {
+      setRefreshingProviders(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshProviderStatus();
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#07111f] text-slate-100 selection:bg-cyan-400/30">
@@ -66,8 +86,24 @@ export default function AppShell() {
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <div className="hidden items-center gap-4 xl:flex">
-                <StatusDot label="Twilio Webhook" detail="Connected" />
-                <StatusDot label="Grok Engine" detail="Active" />
+                <StatusDot
+                  label="Twilio Webhook"
+                  detail={providerHealth?.twilio === "connected" ? "Connected" : providerHealth?.twilio === "not_configured" ? "Not configured" : "Disconnected"}
+                />
+                <StatusDot
+                  label="Grok Engine"
+                  detail={providerHealth?.grok === "connected" ? "Active" : providerHealth?.grok === "not_configured" ? "Not configured" : "Disconnected"}
+                />
+                <button
+                  type="button"
+                  onClick={() => void refreshProviderStatus()}
+                  disabled={refreshingProviders}
+                  aria-label="Refresh provider status"
+                  title="Refresh status"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-700 text-slate-400 transition hover:border-cyan-400/50 hover:text-cyan-300 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <RefreshCw size={14} className={refreshingProviders ? "animate-spin" : ""} />
+                </button>
               </div>
               <TenantSwitcher />
             </div>

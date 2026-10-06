@@ -32,6 +32,20 @@ class AppointmentStatus(str, enum.Enum):
     NO_SHOW = "no_show"
 
 
+class CardStatus(str, enum.Enum):
+    """Whether a usable saved payment method is already on file.
+
+    This is not an appointment lifecycle status and it is not a charge.
+    """
+
+    NOT_REQUIRED = "not_required"
+    NOT_SUPPORTED = "not_supported"
+    UNKNOWN = "unknown"
+    PENDING_CARD = "pending_card"
+    CARD_CONFIRMED = "card_confirmed"
+    FAILED = "failed"
+
+
 class Appointment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """The local source of truth for a booking.
 
@@ -48,6 +62,18 @@ class Appointment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ),
         Index("ix_appointments_user_start", "user_id", "start_time"),
         Index("ix_appointments_tenant_start", "tenant_id", "start_time"),
+        # One appointment per *booking intent*, not per call. A caller who
+        # explicitly asks for two separate appointments gets two intents and
+        # therefore two rows; a caller who changes their mind five times keeps
+        # one intent and one row. Replaces an earlier unique index on
+        # source_call_id, which forbade the first case and turned a repeated
+        # confirmation into an IntegrityError instead of a no-op.
+        Index(
+            "uq_appointments_booking_intent",
+            "booking_intent_key",
+            unique=True,
+            postgresql_where="booking_intent_key IS NOT NULL",
+        ),
     )
 
     user_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -95,6 +121,26 @@ class Appointment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Where this booking was mirrored, and its id over there (if anywhere).
     booking_provider: Mapped[str | None] = mapped_column(String(32))
     external_booking_id: Mapped[str | None] = mapped_column(String(255), index=True)
+
+    # Idempotency key for the conversation that produced this booking, shaped
+    # "<call_sid>:<booking_id>" (see app/services/booking_state.py). Confirming
+    # the same intent twice — a repeated "yes", a retried tool call — resolves
+    # to this row instead of inserting another. Null for appointments created
+    # outside a call, e.g. through the dashboard.
+    booking_intent_key: Mapped[str | None] = mapped_column(String(128))
+
+    # Saved-card result for this visit. Independent of `status`.
+    card_status: Mapped[CardStatus] = mapped_column(
+        Enum(
+            CardStatus,
+            name="card_status",
+            native_enum=True,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=CardStatus.UNKNOWN,
+        server_default=CardStatus.UNKNOWN.value,
+    )
 
     # --- Relationships ---
     user: Mapped["User | None"] = relationship(back_populates="appointments")
